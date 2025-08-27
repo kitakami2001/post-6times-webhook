@@ -1,58 +1,46 @@
-name: post-6times-webhook
+name: Post to Discord via Webhook
+  env:
+    WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+  run: |
+    python - <<'PY'
+    import os, json, urllib.request, urllib.error, datetime
+    from datetime import timedelta, timezone
 
-on:
-  schedule:
-    - cron: "0 2,6,10,14,18,22 * * *"   # UTC→JST 3/7/11/15/19/23
-  workflow_dispatch: {}
+    # ---- JST 現在時刻 ----
+    now_utc = datetime.datetime.now(timezone.utc)
+    now_jst = now_utc + timedelta(hours=9)
+    wd = ['月','火','水','木','金','土','日'][now_jst.weekday()]
+    hh = now_jst.hour
 
-jobs:
-  post:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Verify secret exists
-        run: |
-          if [ -z "${{ secrets.DISCORD_WEBHOOK_URL }}" ]; then
-            echo "::error::Missing repository secret DISCORD_WEBHOOK_URL"; exit 1;
-          fi
+    schedule = {
+        '月': {11: "英雄★", 15: "建築",  19: "兵士",   23: "科学",  3: "ドローン★", 7: "英雄★"},
+        '火': {11: "建築★", 15: "兵士",  19: "科学",   23: "ドローン", 3: "英雄",   7: "建築"},
+        '水': {11: "兵士",   15: "科学★",19: "ドローン",23: "英雄",   3: "建築",   7: "兵士"},
+        '木': {11: "科学",   15: "ドローン",19: "英雄★",23: "建築",  3: "兵士",   7: "科学"},
+        '金': {11: "ドローン",15: "英雄", 19: "建築★", 23: "兵士",   3: "科学",   7: "ドローン"},
+        '土': {11: "英雄★", 15: "建築★",19: "兵士",   23: "科学",   3: "ドローン", 7: "英雄"},
+        '日': {11: "建築",   15: "兵士",  19: "科学",   23: "ドローン",3: "英雄",   7: "建築"},
+    }
+    item = schedule.get(wd, {}).get(hh, "（スケジュール未設定）")
 
-      - name: Post to Discord via Webhook
-        env:
-          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          python - <<'PY'
-          import os, json, urllib.request, datetime
-          from datetime import timedelta, timezone
+    payload = {"content": f"【{wd} {hh:02d}:00】本日の軍拡：{item}"}
 
-          # 現在JST（tz-aware）
-          now_utc = datetime.datetime.now(timezone.utc)
-          now_jst = now_utc + timedelta(hours=9)
-          wd = ['月','火','水','木','金','土','日'][now_jst.weekday()]
-          hh = now_jst.hour
+    url = os.environ.get("WEBHOOK_URL", "").strip()
+    if not url:
+        raise SystemExit("WEBHOOK_URL is empty. Put DISCORD_WEBHOOK_URL in Repository secrets.")
 
-          # 曜日×時刻の文面（必要なら編集）
-          schedule = {
-              '月': {11: "英雄★", 15: "建築",  19: "兵士",   23: "科学",  3: "ドローン★", 7: "英雄★"},
-              '火': {11: "建築★", 15: "兵士",  19: "科学",   23: "ドローン", 3: "英雄",   7: "建築"},
-              '水': {11: "兵士",   15: "科学★",19: "ドローン",23: "英雄",   3: "建築",   7: "兵士"},
-              '木': {11: "科学",   15: "ドローン",19: "英雄★",23: "建築",  3: "兵士",   7: "科学"},
-              '金': {11: "ドローン",15: "英雄", 19: "建築★", 23: "兵士",   3: "科学",   7: "ドローン"},
-              '土': {11: "英雄★", 15: "建築★",19: "兵士",   23: "科学",   3: "ドローン", 7: "英雄"},
-              '日': {11: "建築",   15: "兵士",  19: "科学",   23: "ドローン",3: "英雄",   7: "建築"},
-          }
-          item = schedule.get(wd, {}).get(hh, "（スケジュール未設定）")
-
-          payload = {"content": f"【{wd} {hh:02d}:00】本日の軍拡：{item}"}
-
-          url = os.environ.get("WEBHOOK_URL", "")
-          if not url:
-            raise SystemExit("WEBHOOK_URL is empty. Put DISCORD_WEBHOOK_URL in Repository secrets.")
-
-          req = urllib.request.Request(
-              url,
-              data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-              headers={"Content-Type": "application/json"},
-              method="POST"
-          )
-          with urllib.request.urlopen(req) as r:
-            print("Discord status:", r.status)
-          PY
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req) as r:
+            body = r.read().decode("utf-8", "ignore")
+            print("OK:", r.status, body)
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", "ignore")
+        print("HTTPError:", e.code, err)  # ← ここに Discord のエラーコード/メッセージが出ます
+        raise
+    PY
